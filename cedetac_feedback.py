@@ -45,6 +45,8 @@ CONFIG = {
 
 CMD_LOGIN = 'aws-azure-login --profile {perfil} --mode=gui'
 MAX_REINTENTOS_QUERY = 3
+AVISO_SEGUNDOS = 30      # cada cuánto informar el estado de la query
+POLL_SEGUNDOS = 3        # cada cuánto consultar a Athena
 
 HOJA_IND = 'Indicadores generales'
 HOJA_DAT = 'Feedback CEDETAC'
@@ -170,30 +172,77 @@ def armar_query(archivo_sql, ini, fin):
                .replace('{fecha_fin}', fin.isoformat()))
 
 
+def _es_token_vencido(e):
+    msg = str(e)
+    return 'ExpiredToken' in msg or 'expired' in msg.lower()
+
+
 def ejecutar_query(sql, perfil, session):
+    '''
+    Lanza la query en Athena y hace polling: cada AVISO_SEGUNDOS informa
+    estado, tiempo transcurrido y datos escaneados. Si el token vence
+    mientras espera, pide login y sigue esperando la MISMA query.
+    Ctrl+C cancela la query en Athena.
+    '''
     import awswrangler as wr
     for intento in range(1, MAX_REINTENTOS_QUERY + 1):
         try:
-            log.info('Ejecutando query en Athena (intento %s)...', intento)
-            t0 = time.time()
-            df = wr.athena.read_sql_query(
-                sql=sql,
-                database=CONFIG['database'],
-                workgroup=CONFIG['workgroup'],
-                boto3_session=session,
-                ctas_approach=False,
-                unload_approach=False,
-            )
-            log.info('Query OK: %s filas en %.0f s', len(df), time.time() - t0)
-            return df
+            athena = session.client('athena')
+            qid = athena.start_query_execution(
+                QueryString=sql,
+                QueryExecutionContext={'Database': CONFIG['database']},
+                WorkGroup=CONFIG['workgroup'],
+            )['QueryExecutionId']
+            log.info('Query lanzada en Athena (intento %s) | id: %s', intento, qid)
+            break
         except Exception as e:
-            msg = str(e)
-            if 'ExpiredToken' in msg or 'expired' in msg.lower():
+            if _es_token_vencido(e):
                 log.warning('Token AWS vencido')
                 session = login_aws(perfil)
                 continue
             raise
-    raise RuntimeError('No se pudo ejecutar la query tras {} intentos'.format(MAX_REINTENTOS_QUERY))
+    else:
+        raise RuntimeError('No se pudo lanzar la query tras {} intentos'.format(MAX_REINTENTOS_QUERY))
+
+    t0 = time.time()
+    ultimo_aviso = 0
+    try:
+        while True:
+            try:
+                q = session.client('athena').get_query_execution(QueryExecutionId=qid)['QueryExecution']
+            except Exception as e:
+                if _es_token_vencido(e):
+                    log.warning('Token AWS vencido durante la espera (la query sigue en Athena)')
+                    session = login_aws(perfil)
+                    continue
+                raise
+            estado = q['Status']['State']
+            seg = time.time() - t0
+            if estado in ('SUCCEEDED', 'FAILED', 'CANCELLED'):
+                break
+            if seg - ultimo_aviso >= AVISO_SEGUNDOS:
+                mb = q.get('Statistics', {}).get('DataScannedInBytes', 0) / 1024 ** 2
+                log.info('  ... %s | %d min %02d s | %.0f MB escaneados',
+                         estado, seg // 60, seg % 60, mb)
+                ultimo_aviso = seg
+            time.sleep(POLL_SEGUNDOS)
+    except KeyboardInterrupt:
+        log.warning('Interrumpido: cancelando la query en Athena...')
+        session.client('athena').stop_query_execution(QueryExecutionId=qid)
+        sys.exit(1)
+
+    if estado != 'SUCCEEDED':
+        motivo = q['Status'].get('StateChangeReason', '')
+        raise RuntimeError('La query terminó en {}: {}'.format(estado, motivo))
+
+    mb = q['Statistics'].get('DataScannedInBytes', 0) / 1024 ** 2
+    log.info('Query OK en %d min %02d s | %.0f MB escaneados', seg // 60, seg % 60, mb)
+
+    ruta = q['ResultConfiguration']['OutputLocation']
+    df = wr.s3.read_csv(ruta, boto3_session=session, dtype=str,
+                        keep_default_na=False, na_values=[''])
+    log.info('Resultado descargado: %s filas', len(df))
+    return df
 
 
 # ==================== LIMPIEZA ====================

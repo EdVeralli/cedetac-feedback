@@ -65,7 +65,13 @@ aws-azure-login --profile default --mode=gui
 2. Volver a la terminal del programa y presionar **ENTER**.
 3. El programa verifica las credenciales (`sts get-caller-identity`). Si no son válidas vuelve a pedir el login (`q` para salir). Solo con credenciales válidas ejecuta el resto.
 
-Si el token vence durante la query (dura 1 hora), vuelve a pedir el login y reintenta (hasta 3 veces).
+Mientras la query corre en Athena, cada 30 segundos (`AVISO_SEGUNDOS`) se muestra el estado, el tiempo transcurrido y los MB escaneados:
+
+```
+15:39:05 [INFO]   ... RUNNING | 0 min 30 s | 812 MB escaneados
+```
+
+Si el token vence mientras espera (dura 1 hora), vuelve a pedir el login y sigue esperando la **misma** query, sin relanzarla. `Ctrl+C` cancela la query en Athena.
 
 ### Otras formas
 
