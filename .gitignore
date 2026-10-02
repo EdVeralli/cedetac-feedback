@@ -1,0 +1,20 @@
+# Datos y salidas (contienen comentarios de ciudadanos: NO subir)
+output/
+*.csv
+*.xlsx
+!plantilla/CEDETAC_plantilla.xlsx
+~$*
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Varios
+.claude/
+_to_delete/
+
+# Scripts de la validacion manual inicial
+_validacion/

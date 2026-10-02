@@ -1,0 +1,17 @@
+# ========================================
+# Configuracion de fechas - CEDETAC Feedback
+# ========================================
+# Prioridad: MODO 2 (rango) > MODO 3 (ultimos meses) > MODO 1 (mes)
+# Comentar con # los modos que no se usen.
+
+# MODO 3: Ultimos N meses CERRADOS (como el Excel testigo)
+#   Ej: corrido en octubre 2026 con 3 -> 2026-07-01 al 2026-09-30
+ULTIMOS_MESES=3
+
+# MODO 1: Mes completo
+# MES=9
+# AÑO=2026
+
+# MODO 2: Rango personalizado (formato YYYY-MM-DD)
+# FECHA_INICIO=2026-07-01
+# FECHA_FIN=2026-09-30
